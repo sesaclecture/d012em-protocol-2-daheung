@@ -37,14 +37,21 @@ class Mpu6050Reg(IntEnum):
     SMPLRT_DIV = 0x19
     GYRO_CONFIG = 0x1B
     ACCEL_CONFIG = 0x1C
+
     ACCEL_XOUT_H = 0x3B
+    ACCEL_YOUT_H = 0x3D
+    ACCEL_ZOUT_H = 0x3F
+
     GYRO_XOUT_H = 0x43
+    GYRO_YOUT_H = 0x45
+    GYRO_ZOUT_H = 0x47
+
     WHO_AM_I = 0x75
 
 
 class Rc522Reg(IntEnum):
     """RC522 레지스터 주소 (필요시 추가)"""
-
+    
     COMMAND = 0x01
     COMM_IEN = 0x02
     COMM_IRQ = 0x04
@@ -58,6 +65,8 @@ class Rc522Reg(IntEnum):
     MODE = 0x11
     TX_CONTROL = 0x14
     VERSION = 0x37
+    
+    CODE_REQA = 0x26
 
 
 class Rc522Cmd(IntEnum):
@@ -167,7 +176,13 @@ def read_imu() -> Dict[str, int]:
 
     with SMBus(1) as bus:
         # TODO: I2C로 MPU6050에서 6축 값 읽기
-        pass
+        ax = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.ACCEL_XOUT_H)
+        ay = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.ACCEL_YOUT_H)
+        az = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.ACCEL_ZOUT_H)
+
+        gx = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.GYRO_XOUT_H)
+        gy = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.GYRO_YOUT_H)
+        gz = _read_word(bus, Mpu6050Reg.ADDR, Mpu6050Reg.GYRO_ZOUT_H)
 
     return {"ax": ax, "ay": ay, "az": az, "gx": gx, "gy": gy, "gz": gz}
 
@@ -180,9 +195,11 @@ def wake_device() -> Tuple[int, int]:
     with SMBus(1) as bus:
         # TODO: PWR_MGMT_1 레지스터 읽고, sleep bit 토글
         before = bus.read_byte_data(Mpu6050Reg.ADDR, Mpu6050Reg.PWR_MGMT_1)
-        verify = "not implemented"
+        
+        bus.write_byte_data(Mpu6050Reg.ADDR, Mpu6050Reg.PWR_MGMT_1, before ^ 0x40)
+        after = bus.read_byte_data(Mpu6050Reg.ADDR, Mpu6050Reg.PWR_MGMT_1)
 
-    return before, verify
+    return before, after
 
 
 def rfid_poll_once() -> Tuple[bool, Optional[bytes]]:
@@ -194,7 +211,10 @@ def rfid_poll_once() -> Tuple[bool, Optional[bytes]]:
     r = Rc522SPI()
     try:
         # TODO: REQA 전송 후 ATQA 수신
-        return False, None
+        fifo_out = r.transceive_7bit(Rc522Reg.CODE_REQA)
+        present = len(fifo_out) is not None
+
+        return present, fifo_out
     finally:
         r.close()
 
@@ -208,7 +228,10 @@ def rfid_set_antenna(on: bool) -> int:
     r = Rc522SPI()
     try:
         # TODO: 안테나 on/off 설정
-        return 0
+        r.antenna_on(on)
+        antenna_statue = r.read_reg(Rc522Reg.TX_CONTROL)
+        
+        return antenna_statue
     finally:
         r.close()
 
@@ -223,8 +246,8 @@ def ssh_get_arch() -> str:
     archs = ("aarch64", "arm64")
 
     # TODO: user_host, cmd 채우기
-    user_host = ""
-    cmd = ""
+    user_host = "intel@192.168.100.130"
+    cmd = f"uname -m"
 
     if not user_host or not user_host.strip():
         raise ValueError("user_host를 반드시 채우세요.")
